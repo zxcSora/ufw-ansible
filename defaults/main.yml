@@ -1,7 +1,7 @@
 ---
 
-ufw_default_incoming_policy: deny
-ufw_default_outgoing_policy: allow
+ufw_default_incoming_policy: 'deny'
+ufw_default_outgoing_policy: 'allow'
 reset_rules: 'yes'
 
 
