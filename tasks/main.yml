@@ -1,0 +1,166 @@
+---
+- name: gather facts
+  setup:
+  delegate_to: "{{ item }}"
+  delegate_facts: True
+  with_items: 
+    - "{{ groups['MONITORING'] }}"
+    - "{{ groups['BACKUP'] }}"
+    - "{{ groups['DNS'] }}"
+    - "{{ groups['LB1'] }}"
+    - "{{ groups['GW'] }}"
+    - "{{ groups['VPN'] }}"
+    - "{{ groups['CI_server'] }}"
+- name: gather facts
+  setup:
+- name: Install UFW
+  apt:
+    name: ufw
+    state: present
+    update_cache: no
+
+- name: backup UFW rules
+  copy:
+    src: /etc/ufw/user.rules
+    dest: /etc/ufw/user.rules.backup
+    remote_src: yes
+    owner: root
+    group: root
+    mode: 640
+    backup: yes
+
+- name: configure | reset
+  ufw:
+    state: reset
+  when: reset_rules == 'yes'
+
+- name: Allow everything and enable UFW
+  ufw:
+    state: enabled
+    policy: allow
+    direction: incoming
+  notify: reload_ufw
+
+##### SETTING DEFAULT RULES #####
+
+- name: Allow ssh from gateway
+  ufw:
+    rule: allow
+    to_ip: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }}"
+    from_ip: "{{ hostvars[item]['ansible_eth0']['ipv4']['address'] }}"
+    to_port: '22'
+    comment: "ALLOW SSH FROM GW"
+  with_items: "{{groups['GW']}}"
+  tags: config
+  notify: reload_ufw
+
+- name: Allow ssh from VPN
+  ufw:
+    rule: allow
+    to_ip: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }}"
+    from_ip: "{{ hostvars[item]['ansible_eth0']['ipv4']['address'] }}"
+    to_port: '22'
+    comment: "ALLOW SSH FROM VPN"
+  with_items: "{{groups['VPN']}}"
+  tags: config
+  notify: reload_ufw
+
+- name: Allow ssh from Teamcity Server
+  ufw:
+    rule: allow
+    to_ip: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }}"
+    from_ip: "{{ hostvars[item]['ansible_eth0']['ipv4']['address'] }}"
+    to_port: '22'
+    comment: "ALLOW SSH FROM CI_SERVER"
+  with_items: "{{groups['CI_server']}}"
+  tags: config
+  notify: reload_ufw
+
+- name: Allow Bacula-FD
+  ufw:
+    rule: allow
+    to_ip: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }}"
+    from_ip: "{{ hostvars[item]['ansible_eth0']['ipv4']['address'] }}"
+    to_port: '9102'
+    comment: "ALLOW BACULA-FD"
+  with_items: "{{groups['BACKUP']}}"
+  tags: config
+  notify: reload_ufw
+
+- name: Allow node exporter
+  ufw:
+    rule: allow
+    to_ip: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }}"
+    from_ip: "{{ hostvars[item]['ansible_eth0']['ipv4']['address'] }}"
+    to_port: '9100'
+    comment: "ALLOW NODE_EXPORTER"
+  with_items: "{{groups['MONITORING']}}"
+  tags: config
+  notify: reload_ufw
+
+##### SETTING RULES FROM MONITORING #####
+
+- name: Allow from monitoring
+  ufw:
+    rule: allow
+    to_ip: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }}"
+    from_ip: "{{ hostvars[item[0]]['ansible_eth0']['ipv4']['address'] }}"
+    to_port: "{{ item[1] }}"
+    comment: "RULES FROM MONITORING"
+  with_nested:
+    - "{{ groups['MONITORING'] }}"
+    - "{{ ufw_ports_from_monitoring }}"
+  tags: config
+  notify: reload_ufw  
+
+##### SETTING RULES FROM VPN #####
+
+- name: Allow from VPN
+  ufw:
+    rule: allow
+    to_ip: "{{ hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address'] }}"
+    from_ip: "{{ hostvars[item[0]]['ansible_eth0']['ipv4']['address'] }}"
+    to_port: "{{ item[1] }}"
+    comment: "RULES FROM VPN"
+  with_nested:
+    - "{{ groups['VPN'] }}"
+    - "{{ ufw_ports_from_vpn }}"
+  tags: config
+  notify: reload_ufw
+
+##### SETTING RULES #####
+
+- name: configure | rules
+  ufw:
+    rule: "{{ item.rule | default('allow') }}"
+    interface: "{{ item.interface | default('') }}"
+    direction: "{{ item.direction | default('in') }}"
+    from_ip: "{{ item.from_ip | default('any') }}"
+    to_ip: "{{ item.to_ip | default(hostvars[inventory_hostname]['ansible_eth0']['ipv4']['address']) }}"
+    from_port: "{{ item.from_port | default('') }}"
+    to_port: "{{ item.to_port | default('') }}"
+    protocol: "{{ item.protocol | default('any') }}"
+    route: "{{ item.route | default(omit) }}"
+    log: "{{ item.log | default(false) }}"
+    comment: "{{ item.comment | default('ANSIBLE CUSTOM RULE') }}"
+  with_items: "{{ ufw_rules }}"
+  tags: config
+  notify: reload_ufw
+
+- name: configure | default (incoming) policy
+  ufw:
+    policy: "{{ ufw_default_incoming_policy }}"
+    direction: incoming
+  notify: reload_ufw
+
+- name: configure | default (outgoing) policy
+  ufw:
+    policy: "{{ ufw_default_outgoing_policy }}"
+    direction: outgoing
+  notify: reload_ufw
+
+- name: Set logging
+  ufw:
+    logging: 'off'
+
+    # tasks file for firewall
