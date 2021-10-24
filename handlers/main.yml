@@ -4,4 +4,3 @@
   ufw:
     state: reloaded
 
-# handlers file for firewall
